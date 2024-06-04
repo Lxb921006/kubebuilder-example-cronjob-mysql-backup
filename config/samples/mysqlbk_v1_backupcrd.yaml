@@ -1,0 +1,29 @@
+apiVersion: mysqlbk.bk.io/v1
+kind: BackupCrd
+metadata:
+  labels:
+    app.kubernetes.io/name: mysqlbackup
+    app.kubernetes.io/managed-by: kustomize
+  name: backupcrd-sample
+  namespace: mysqlbackup-system
+spec:
+  # TODO(user): Add fields here
+  schedule: "*/1 * * * *"
+  startingDeadlineSeconds: 60
+  concurrencyPolicy: Allow # explicitly specify, but Allow is also default.
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: mysql
+              image: mysql:5.7
+              command: ["/bin/bash", "/opt/mysqlbk.sh"] # 执行的命令
+              volumeMounts:
+                - name: backupcrd-sample-storage
+                  mountPath: /opt
+          volumes:
+            - name: backupcrd-sample-storage
+              persistentVolumeClaim:
+                claimName: backupcrd-sample-pvc
+          restartPolicy: OnFailure

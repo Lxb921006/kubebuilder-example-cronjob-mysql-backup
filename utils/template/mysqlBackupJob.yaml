@@ -1,0 +1,13 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{.ObjectMeta.Name}}-job
+  namespace: {{.ObjectMeta.Namespace}}
+spec:
+  template:
+    spec:
+      containers:
+        - name: {{.ObjectMeta.Name}}
+          image: mysql:5.7
+          command: ["mysqldump", "-uroot", "-p123321", "-h", ""] # 执行的命令
+      restartPolicy: OnFailure # 当容器退出时的行为

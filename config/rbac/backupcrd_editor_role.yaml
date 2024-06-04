@@ -1,0 +1,49 @@
+# permissions for end users to edit backupcrds.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: backupcrd-editor-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: mysqlbackup
+    app.kubernetes.io/part-of: mysqlbackup
+    app.kubernetes.io/managed-by: kustomize
+  name: backupcrd-editor-role
+rules:
+- apiGroups:
+  - mysqlbk.bk.io
+  resources:
+  - backupcrds
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - mysqlbk.bk.io
+  resources:
+  - backupcrds/status
+  verbs:
+  - get
+- apiGroups:
+    - batch
+  resources:
+    - jobs
+  verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
+    - batch
+  resources:
+    - jobs/status
+  verbs:
+    - get

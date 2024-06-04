@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- mysqlbk_v1_backupcrd.yaml
+#+kubebuilder:scaffold:manifestskustomizesamples

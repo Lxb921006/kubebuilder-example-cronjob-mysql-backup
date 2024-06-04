@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{.ObjectMeta.Name}}-state
+  namespace: {{.ObjectMeta.Namespace}}
+spec:
+  serviceName: {{.ObjectMeta.Name}}-cluster
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{.ObjectMeta.Name}}-app
+  template:
+    metadata:
+      labels:
+        app: {{.ObjectMeta.Name}}-app
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:5.7 # 使用适合的MySQL镜像
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{.ObjectMeta.Name}}-secret
+                  key: password

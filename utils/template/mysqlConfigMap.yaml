@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{.ObjectMeta.Name}}-map
+  namespace: {{.ObjectMeta.Namespace}}
+data:
+  MYSQL_ROOT_PASSWORD: "abc@321*" # 实际部署时应通过Secrets管理
