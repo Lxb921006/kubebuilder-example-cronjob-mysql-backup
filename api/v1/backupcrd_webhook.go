@@ -54,6 +54,10 @@ func (r *BackupCrd) Default() {
 	if r.Spec.Suspend == nil {
 		r.Spec.Suspend = new(bool)
 	}
+	if r.Spec.Replicas == nil {
+		r.Spec.Replicas = new(int32)
+		*r.Spec.Replicas = 1
+	}
 	if r.Spec.SuccessfulJobsHistoryLimit == nil {
 		r.Spec.SuccessfulJobsHistoryLimit = new(int32)
 		*r.Spec.SuccessfulJobsHistoryLimit = 3

@@ -5,7 +5,7 @@ metadata:
   namespace: {{.ObjectMeta.Namespace}}
 spec:
   serviceName: {{.ObjectMeta.Name}}-cluster
-  replicas: 1
+  replicas: {{.Spec.Replicas}}
   selector:
     matchLabels:
       app: {{.ObjectMeta.Name}}-app

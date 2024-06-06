@@ -6,6 +6,7 @@ import (
 	oe "errors"
 	"fmt"
 	mysqlbkv1 "github.com/Lxb921006/mysqlBackup/api/v1"
+	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -17,6 +18,7 @@ import (
 	"path/filepath"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"text/template"
 	"time"
 )
@@ -147,17 +149,20 @@ type controllerConfig struct {
 	bk     *mysqlbkv1.BackupCrd
 	r      client.Client
 	schema *runtime.Scheme
+	log    logr.Logger
 }
 
 type CreateResources struct {
 }
 
 func (c *CreateResources) CreateMysqlRefResources(ctx context.Context, bk *mysqlbkv1.BackupCrd, r client.Client, schema *runtime.Scheme) error {
+	logger := log.FromContext(ctx)
 	cr := &controllerConfig{
 		ctx:    ctx,
 		bk:     bk,
 		r:      r,
 		schema: schema,
+		log:    logger,
 	}
 
 	if err := c.createPv(cr); err != nil {
@@ -270,7 +275,7 @@ func (c *CreateResources) createState(cr *controllerConfig) error {
 				return err
 			}
 
-			if err := c.statesPodCheck(cr); err != nil {
+			if err := c.statesPodCheck(cr, resources); err != nil {
 				return err
 			}
 
@@ -280,14 +285,23 @@ func (c *CreateResources) createState(cr *controllerConfig) error {
 		return err
 	}
 
-	if err := c.statesPodCheck(cr); err != nil {
+	if err := c.statesPodCheck(cr, resources); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (c *CreateResources) statesPodCheck(cr *controllerConfig) error {
+func (c *CreateResources) statesPodCheck(cr *controllerConfig, resources *appsv1.StatefulSet) error {
+	if *resources.Spec.Replicas != *cr.bk.Spec.Replicas {
+		*resources.Spec.Replicas = *cr.bk.Spec.Replicas
+		if err := cr.r.Update(cr.ctx, resources); err != nil {
+			cr.log.Error(err, "fail to update StatefulSet resource", cr.bk.Name+"-state")
+			return err
+		}
+		cr.log.Info("StatefulSet resource change", "StatefulSet", cr.bk.Name+"-state")
+	}
+
 	podList := new(corev1.PodList)
 	if err := cr.r.List(cr.ctx, podList, client.InNamespace(cr.bk.Namespace), client.MatchingLabels{"app": cr.bk.Name + "-app"}); err != nil {
 		return err
@@ -297,10 +311,16 @@ func (c *CreateResources) statesPodCheck(cr *controllerConfig) error {
 		return oe.New(fmt.Sprintf("waiting create StatefulSet pod resource %s-state", cr.bk.Name))
 	}
 
+	var check = len(podList.Items)
+
 	for _, v := range podList.Items {
 		if !v.Status.ContainerStatuses[0].Ready {
-			return oe.New(fmt.Sprintf("waiting statefulSet %s-state`s pod ready", cr.bk.Name))
+			check -= 1
 		}
+	}
+
+	if check <= 0 {
+		return oe.New(fmt.Sprintf("waiting statefulSet %s-state`s pod ready", cr.bk.Name))
 	}
 
 	return nil

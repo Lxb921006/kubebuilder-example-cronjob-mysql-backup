@@ -86,24 +86,16 @@ func (r *BackupCrdReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{RequeueAfter: time.Duration(10) * time.Second}, nil
 	}
 
-	ifFirstCreateJob, activeJobs, err := r.reconcileJobList(ctx, bk, logCtr)
+	_, activeJobs, err := r.reconcileJobList(ctx, bk, logCtr)
 	if err != nil {
 		logCtr.Error(err, "fail to get job list")
 		return ctrl.Result{RequeueAfter: time.Duration(10) * time.Second}, nil
 	}
 
+	fmt.Printf("lastScheduleTime >>> %s, now >>> %s\n", bk.Status.LastScheduleTime, r.Now())
+
 	if bk.Status.LastScheduleTime == nil {
 		return ctrl.Result{RequeueAfter: time.Duration(30) * time.Second}, nil
-	}
-
-	if ifFirstCreateJob {
-		var lastScheduleTime time.Time
-		lastScheduleTime, err = time.Parse(time.RFC3339, bk.Status.LastScheduleTime.Time.String())
-		if err != nil {
-			return ctrl.Result{}, nil
-		}
-
-		return ctrl.Result{RequeueAfter: lastScheduleTime.Sub(r.Now())}, nil
 	}
 
 	if bk.Spec.Suspend != nil && *bk.Spec.Suspend {
@@ -171,18 +163,19 @@ func (r *BackupCrdReconciler) reconcileJobList(ctx context.Context, bk *mysqlbkv
 			return false, activeJobs, err
 		}
 
+		fmt.Println("now >>> ", r.Now())
 		nextTime := shed.Next(r.Now())
-		for !r.Now().After(nextTime) {
-		}
-
-		nextSch := shed.Next(nextTime)
-		bk.Status.LastScheduleTime = &metav1.Time{Time: nextSch}
-		err = r.Status().Update(ctx, bk)
-		if err != nil {
+		fmt.Println("next >>> ", nextTime)
+		//for !r.Now().After(nextTime) {
+		//}
+		//
+		//nextSch := shed.Next(nextTime)
+		bk.Status.LastScheduleTime = &metav1.Time{Time: nextTime}
+		if err = r.Status().Update(ctx, bk); err != nil {
 			return false, activeJobs, err
 		}
 
-		_, err = r.reconcileJob(ctx, bk, logCtr, nextSch)
+		_, err = r.reconcileJob(ctx, bk, logCtr, nextTime)
 		if err != nil {
 			return false, activeJobs, err
 		}
@@ -211,7 +204,10 @@ func (r *BackupCrdReconciler) reconcileJobList(ctx context.Context, bk *mysqlbkv
 	}
 
 	sort.Slice(jl.Items, func(i, j int) bool {
-		return jl.Items[i].Name < jl.Items[j].Name
+		if jl.Items[i].Status.StartTime == nil {
+			return jl.Items[i].Status.StartTime != nil
+		}
+		return jl.Items[i].Status.StartTime.Before(jl.Items[j].Status.StartTime)
 	})
 
 	for i, childJob := range jl.Items {
@@ -226,6 +222,7 @@ func (r *BackupCrdReconciler) reconcileJobList(ctx context.Context, bk *mysqlbkv
 		}
 
 		lastScheduleTime = getLastScheduleTime(&childJob)
+		fmt.Println("Items time >>> ", lastScheduleTime)
 	}
 
 	if lastScheduleTime.IsZero() {

@@ -38,10 +38,11 @@ const (
 type BackupCrdSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-
 	Schedule string `json:"schedule"`
 
 	JobTemplate batchv1.JobTemplateSpec `json:"jobTemplate"`
+
+	Replicas *int32 `json:"replicas,omitempty"`
 
 	Suspend *bool `json:"suspend,omitempty"`
 
