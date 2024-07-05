@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	oe "errors"
 	"fmt"
 	mysqlbkv1 "github.com/Lxb921006/mysqlBackup/api/v1"
 	"github.com/Lxb921006/mysqlBackup/utils"
@@ -26,7 +27,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilcache "k8s.io/apimachinery/pkg/util/cache"
@@ -73,29 +73,26 @@ func (r *BackupCrdReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// TODO(user): your logic here
 	var bk = new(mysqlbkv1.BackupCrd)
 	if err := r.Get(ctx, req.NamespacedName, bk); err != nil {
-		if errors.IsNotFound(err) {
-			logCtr.Error(err, "fail to get BackupCrd batchv1 resource")
-			return ctrl.Result{}, nil
-		}
-
-		return ctrl.Result{}, nil
+		logCtr.Error(err, "unable to fetch BackupCrd")
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
 	if err := r.CreateMysqlRefResources(ctx, bk, r.Client, r.Scheme); err != nil {
 		logCtr.Error(err, "fail to CreateMysqlRefResources")
-		return ctrl.Result{RequeueAfter: time.Duration(10) * time.Second}, nil
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
-	_, activeJobs, err := r.reconcileJobList(ctx, bk, logCtr)
+	first, activeJobs, err := r.reconcileJobList(ctx, bk, logCtr)
 	if err != nil {
-		logCtr.Error(err, "fail to get job list")
-		return ctrl.Result{RequeueAfter: time.Duration(10) * time.Second}, nil
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
-
-	fmt.Printf("lastScheduleTime >>> %s, now >>> %s\n", bk.Status.LastScheduleTime, r.Now())
 
 	if bk.Status.LastScheduleTime == nil {
 		return ctrl.Result{RequeueAfter: time.Duration(30) * time.Second}, nil
+	}
+
+	if first {
+		return ctrl.Result{RequeueAfter: bk.Status.LastScheduleTime.Sub(r.Now())}, nil
 	}
 
 	if bk.Spec.Suspend != nil && *bk.Spec.Suspend {
@@ -103,7 +100,12 @@ func (r *BackupCrdReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
-	missionTime, nextTime, _ := r.getNextScheduledTime(bk, r.Now(), logCtr)
+	missionTime, nextTime, err := r.getNextScheduledTime(bk, r.Now(), logCtr)
+	if err != nil {
+		logCtr.Error(err, "unable to figure out CronJob schedule")
+		return ctrl.Result{}, nil
+	}
+
 	scheduledResult := ctrl.Result{RequeueAfter: nextTime.Sub(r.Now())}
 
 	if missionTime.IsZero() {
@@ -163,13 +165,7 @@ func (r *BackupCrdReconciler) reconcileJobList(ctx context.Context, bk *mysqlbkv
 			return false, activeJobs, err
 		}
 
-		fmt.Println("now >>> ", r.Now())
 		nextTime := shed.Next(r.Now())
-		fmt.Println("next >>> ", nextTime)
-		//for !r.Now().After(nextTime) {
-		//}
-		//
-		//nextSch := shed.Next(nextTime)
 		bk.Status.LastScheduleTime = &metav1.Time{Time: nextTime}
 		if err = r.Status().Update(ctx, bk); err != nil {
 			return false, activeJobs, err
@@ -182,6 +178,8 @@ func (r *BackupCrdReconciler) reconcileJobList(ctx context.Context, bk *mysqlbkv
 
 		return true, activeJobs, nil
 	}
+
+	currJobList := jl.Items
 
 	isJobFinished := func(job *batchv1.Job) (bool, batchv1.JobConditionType) {
 		for _, c := range job.Status.Conditions {
@@ -203,26 +201,22 @@ func (r *BackupCrdReconciler) reconcileJobList(ctx context.Context, bk *mysqlbkv
 		return &parse
 	}
 
-	sort.Slice(jl.Items, func(i, j int) bool {
-		if jl.Items[i].Status.StartTime == nil {
-			return jl.Items[i].Status.StartTime != nil
-		}
-		return jl.Items[i].Status.StartTime.Before(jl.Items[j].Status.StartTime)
+	sort.Slice(currJobList, func(i, j int) bool {
+		return currJobList[i].Name < currJobList[j].Name
 	})
 
-	for i, childJob := range jl.Items {
+	for i, childJob := range currJobList {
 		_, jobStatus := isJobFinished(&childJob)
 		switch jobStatus {
 		case "":
-			activeJobs = append(activeJobs, &jl.Items[i])
+			activeJobs = append(activeJobs, &currJobList[i])
 		case batchv1.JobFailed:
-			failedJobs = append(failedJobs, &jl.Items[i])
+			failedJobs = append(failedJobs, &currJobList[i])
 		case batchv1.JobComplete:
-			successfulJobs = append(successfulJobs, &jl.Items[i])
+			successfulJobs = append(successfulJobs, &currJobList[i])
 		}
 
 		lastScheduleTime = getLastScheduleTime(&childJob)
-		fmt.Println("Items time >>> ", lastScheduleTime)
 	}
 
 	if lastScheduleTime.IsZero() {
@@ -242,7 +236,8 @@ func (r *BackupCrdReconciler) reconcileJobList(ctx context.Context, bk *mysqlbkv
 	}
 
 	if err := r.Status().Update(ctx, bk); err != nil {
-		return false, activeJobs, err
+		logCtr.Error(err, "fail to update crd status", "crd", bk.Name)
+		return false, activeJobs, oe.New("fail to update crd status")
 	}
 
 	r.deleteFailedAndSucceedJobs(ctx, bk, failedJobs, successfulJobs, logCtr)
@@ -310,10 +305,7 @@ func (r *BackupCrdReconciler) getNextScheduledTime(bk *mysqlbkv1.BackupCrd, now 
 func (r *BackupCrdReconciler) deleteFailedAndSucceedJobs(ctx context.Context, bk *mysqlbkv1.BackupCrd, failedJobs, successfulJobs []*batchv1.Job, log logr.Logger) {
 	if len(failedJobs) > int(*bk.Spec.FailedJobsHistoryLimit) {
 		sort.Slice(failedJobs, func(i, j int) bool {
-			if failedJobs[i].Status.StartTime == nil {
-				return failedJobs[i].Status.StartTime != nil
-			}
-			return failedJobs[i].Status.StartTime.Before(failedJobs[j].Status.StartTime)
+			return failedJobs[i].Name < failedJobs[j].Name
 		})
 
 		for _, job := range failedJobs[:len(failedJobs)-(int(*bk.Spec.FailedJobsHistoryLimit))] {
@@ -327,10 +319,7 @@ func (r *BackupCrdReconciler) deleteFailedAndSucceedJobs(ctx context.Context, bk
 
 	if len(successfulJobs) > int(*bk.Spec.SuccessfulJobsHistoryLimit) {
 		sort.Slice(successfulJobs, func(i, j int) bool {
-			if successfulJobs[i].Status.StartTime == nil {
-				return successfulJobs[i].Status.StartTime != nil
-			}
-			return successfulJobs[i].Status.StartTime.Before(successfulJobs[j].Status.StartTime)
+			return successfulJobs[i].Name < successfulJobs[j].Name
 		})
 
 		for _, job := range successfulJobs[:len(successfulJobs)-(int(*bk.Spec.SuccessfulJobsHistoryLimit))] {
@@ -365,12 +354,11 @@ func (r *BackupCrdReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		if owner == nil {
 			return nil
 		}
-		// ...make sure it's a CronJob...
+
 		if owner.APIVersion != apiGVStr || owner.Kind != "BackupCrd" {
 			return nil
 		}
 
-		// ...and if so, return it
 		return []string{owner.Name}
 	}); err != nil {
 		return err

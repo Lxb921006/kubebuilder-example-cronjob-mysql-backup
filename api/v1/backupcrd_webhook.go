@@ -64,7 +64,7 @@ func (r *BackupCrd) Default() {
 	}
 	if r.Spec.FailedJobsHistoryLimit == nil {
 		r.Spec.FailedJobsHistoryLimit = new(int32)
-		*r.Spec.FailedJobsHistoryLimit = 1
+		*r.Spec.FailedJobsHistoryLimit = 2
 	}
 }
 

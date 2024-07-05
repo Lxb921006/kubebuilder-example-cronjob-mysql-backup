@@ -275,7 +275,7 @@ func (c *CreateResources) createState(cr *controllerConfig) error {
 				return err
 			}
 
-			if err := c.statesPodCheck(cr, resources); err != nil {
+			if err := c.statesCheck(cr, resources); err != nil {
 				return err
 			}
 
@@ -285,21 +285,21 @@ func (c *CreateResources) createState(cr *controllerConfig) error {
 		return err
 	}
 
-	if err := c.statesPodCheck(cr, resources); err != nil {
+	if err := c.statesCheck(cr, resources); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (c *CreateResources) statesPodCheck(cr *controllerConfig, resources *appsv1.StatefulSet) error {
+func (c *CreateResources) statesCheck(cr *controllerConfig, resources *appsv1.StatefulSet) error {
 	if *resources.Spec.Replicas != *cr.bk.Spec.Replicas {
 		*resources.Spec.Replicas = *cr.bk.Spec.Replicas
 		if err := cr.r.Update(cr.ctx, resources); err != nil {
 			cr.log.Error(err, "fail to update StatefulSet resource", cr.bk.Name+"-state")
 			return err
 		}
-		cr.log.Info("StatefulSet resource change", "StatefulSet", cr.bk.Name+"-state")
+		cr.log.Info("StatefulSet resource update successful", "StatefulSet", cr.bk.Name+"-state")
 	}
 
 	podList := new(corev1.PodList)
@@ -312,10 +312,11 @@ func (c *CreateResources) statesPodCheck(cr *controllerConfig, resources *appsv1
 	}
 
 	var check = len(podList.Items)
-
 	for _, v := range podList.Items {
-		if !v.Status.ContainerStatuses[0].Ready {
-			check -= 1
+		for _, p := range v.Status.ContainerStatuses {
+			if !p.Ready {
+				check -= 1
+			}
 		}
 	}
 

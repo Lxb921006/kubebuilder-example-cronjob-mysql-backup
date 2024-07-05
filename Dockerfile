@@ -1,7 +1,8 @@
 # Build the manager binary
-FROM golang:1.21 AS builder
-ARG TARGETOS
-ARG TARGETARCH
+# FROM golang:1.21 AS builder
+FROM 19921006/go:v1.21.1 AS builder
+# ARG TARGETOS
+# ARG TARGETARCH
 
 WORKDIR /workspace
 # Copy the Go Modules manifests
@@ -14,6 +15,7 @@ RUN go mod download
 # Copy the go source
 COPY cmd/main.go cmd/main.go
 COPY api/ api/
+COPY utils/ utils/
 COPY internal/controller/ internal/controller/
 
 # Build
@@ -28,6 +30,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o ma
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
 COPY --from=builder /workspace/manager .
+COPY --from=builder /workspace/utils /utils
 USER 65532:65532
 
 ENTRYPOINT ["/manager"]
